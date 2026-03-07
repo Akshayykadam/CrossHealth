@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    CrossHealth - Unity Plugin for HealthKit & Health Connect
+    Android Dependencies Configuration
+    
+    This file declares the Android Resolver / External Dependency Manager
+    dependencies needed for Health Connect integration.
+    
+    Place this file in Assets/CrossHealth/Editor/ for automatic resolution.
+-->
+<dependencies>
+    <androidPackages>
+        <androidPackage spec="androidx.health.connect:connect-client:1.1.0">
+            <repositories>
+                <repository>https://maven.google.com</repository>
+            </repositories>
+        </androidPackage>
+    </androidPackages>
+</dependencies>
