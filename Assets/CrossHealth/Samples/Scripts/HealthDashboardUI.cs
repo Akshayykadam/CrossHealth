@@ -1,8 +1,9 @@
 // CrossHealth - Unity Plugin for HealthKit & Health Connect
-// Sample Scene - Health Dashboard UI
+// Sample Scene V2 - Health Dashboard UI
 // Copyright (c) 2025. All rights reserved.
 
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using CrossHealth;
@@ -10,14 +11,12 @@ using CrossHealth;
 namespace CrossHealth.Samples
 {
     /// <summary>
-    /// Sample UI script demonstrating the CrossHealth plugin.
-    /// Attach to a Canvas GameObject with the UI elements referenced below.
-    ///
-    /// This script demonstrates:
-    /// - Requesting health data permissions
-    /// - Querying each supported health data type
-    /// - Displaying results in a simple UI
-    /// - Error handling
+    /// Sample UI demonstrating all CrossHealth V2 features:
+    /// - Permission request flow
+    /// - All 15 health data types
+    /// - Real-time observer for heart rate
+    /// - Historical data display
+    /// - Mock data in Editor
     /// </summary>
     public class HealthDashboardUI : MonoBehaviour
     {
@@ -34,6 +33,15 @@ namespace CrossHealth.Samples
         [SerializeField] private Button getBMIButton;
         [SerializeField] private Button getAllDataButton;
 
+        [Header("V2 Buttons")]
+        [SerializeField] private Button getSleepButton;
+        [SerializeField] private Button getSpO2Button;
+        [SerializeField] private Button getWorkoutButton;
+        [SerializeField] private Button getBloodPressureButton;
+        [SerializeField] private Button getRespiratoryButton;
+        [SerializeField] private Button toggleObserverButton;
+        [SerializeField] private Button getHistoryButton;
+
         [Header("Display")]
         [SerializeField] private Text statusText;
         [SerializeField] private Text dataDisplayText;
@@ -43,234 +51,331 @@ namespace CrossHealth.Samples
         [SerializeField] private int lookBackDays = 1;
 
         private bool _permissionsGranted = false;
+        private bool _isObservingHR = false;
 
         private void Start()
         {
+            // Subscribe to events
+            HealthEvents.OnDataReceived += OnDataEvent;
+            HealthEvents.OnObserverUpdate += OnObserverEvent;
+
             // Check availability
             bool available = CrossHealthManager.Instance.IsAvailable();
-            SetStatus(available ? "Health services available. Request permissions to begin." : "Health services NOT available on this device.");
+            SetStatus(available
+                ? "Health services available. Request permissions to begin."
+                : "Health services NOT available on this device.");
 
             // Setup button listeners
-            if (requestPermissionsButton != null)
-                requestPermissionsButton.onClick.AddListener(OnRequestPermissions);
+            WireButton(requestPermissionsButton, OnRequestPermissions);
+            WireButton(getStepsButton, OnGetSteps);
+            WireButton(getHeartRateButton, OnGetHeartRate);
+            WireButton(getDistanceButton, OnGetDistance);
+            WireButton(getEnergyButton, OnGetEnergy);
+            WireButton(getFloorsButton, OnGetFloors);
+            WireButton(getRestingHRButton, OnGetRestingHR);
+            WireButton(getBodyMassButton, OnGetBodyMass);
+            WireButton(getHeightButton, OnGetHeight);
+            WireButton(getBMIButton, OnGetBMI);
+            WireButton(getAllDataButton, OnGetAllData);
 
-            if (getStepsButton != null)
-                getStepsButton.onClick.AddListener(OnGetSteps);
+            // V2 buttons
+            WireButton(getSleepButton, OnGetSleep);
+            WireButton(getSpO2Button, OnGetSpO2);
+            WireButton(getWorkoutButton, OnGetWorkout);
+            WireButton(getBloodPressureButton, OnGetBloodPressure);
+            WireButton(getRespiratoryButton, OnGetRespiratory);
+            WireButton(toggleObserverButton, OnToggleObserver);
+            WireButton(getHistoryButton, OnGetHistory);
 
-            if (getHeartRateButton != null)
-                getHeartRateButton.onClick.AddListener(OnGetHeartRate);
-
-            if (getDistanceButton != null)
-                getDistanceButton.onClick.AddListener(OnGetDistance);
-
-            if (getEnergyButton != null)
-                getEnergyButton.onClick.AddListener(OnGetEnergy);
-
-            if (getFloorsButton != null)
-                getFloorsButton.onClick.AddListener(OnGetFloors);
-
-            if (getRestingHRButton != null)
-                getRestingHRButton.onClick.AddListener(OnGetRestingHR);
-
-            if (getBodyMassButton != null)
-                getBodyMassButton.onClick.AddListener(OnGetBodyMass);
-
-            if (getHeightButton != null)
-                getHeightButton.onClick.AddListener(OnGetHeight);
-
-            if (getBMIButton != null)
-                getBMIButton.onClick.AddListener(OnGetBMI);
-
-            if (getAllDataButton != null)
-                getAllDataButton.onClick.AddListener(OnGetAllData);
-
-            // Initially disable data buttons until permissions are granted
             SetDataButtonsInteractable(false);
         }
 
+        private void OnDestroy()
+        {
+            HealthEvents.OnDataReceived -= OnDataEvent;
+            HealthEvents.OnObserverUpdate -= OnObserverEvent;
+
+            if (_isObservingHR)
+                CrossHealthManager.Instance?.StopObserving(HealthDataType.HeartRate);
+        }
+
         // ====================================================================
-        // Button Handlers
+        // Event Handlers
+        // ====================================================================
+
+        private void OnDataEvent(HealthQueryResult result)
+        {
+            if (CrossHealthSettings.Instance.VerboseLogging)
+                Debug.Log($"[CrossHealth Event] Data received: {result.DataType} = {result.AggregatedValue}");
+        }
+
+        private void OnObserverEvent(HealthDataType type, double value)
+        {
+            SetDataDisplay($"🔴 LIVE {type}: {value} {HealthDataTypeInfo.GetUnit(type)}\n(Updates every {CrossHealthSettings.Instance.DefaultObserverInterval}s)");
+        }
+
+        // ====================================================================
+        // Button Handlers - V1
         // ====================================================================
 
         private void OnRequestPermissions()
         {
             SetStatus("Requesting permissions...");
-
             CrossHealthManager.Instance.RequestAllPermissions((granted) =>
             {
                 _permissionsGranted = granted;
                 SetDataButtonsInteractable(granted);
-
-                if (granted)
-                {
-                    SetStatus("Permissions granted! Tap any button to fetch data.");
-                }
-                else
-                {
-                    SetStatus("Permissions denied. Please enable in device Settings.");
-                }
+                SetStatus(granted
+                    ? "Permissions granted! Tap any button to fetch data."
+                    : "Permissions denied. Please enable in device Settings.");
             });
         }
 
         private void OnGetSteps()
         {
             SetStatus("Fetching steps...");
-            DateTime start = DateTime.Today.AddDays(-lookBackDays);
-            DateTime end = DateTime.Now;
-
-            CrossHealthManager.Instance.GetStepCount(start, end, (steps) =>
+            var (start, end) = GetTimeRange();
+            CrossHealthManager.Instance.GetStepCount(start, end, (v) =>
             {
-                SetDataDisplay($"Steps ({GetTimeRangeLabel()}): {steps:N0}");
-                SetStatus("Step count retrieved.");
+                SetDataDisplay($"🚶 Steps ({GetLabel()}): {v:N0}");
+                SetStatus("Done.");
             });
         }
 
         private void OnGetHeartRate()
         {
             SetStatus("Fetching heart rate...");
-            DateTime start = DateTime.Today.AddDays(-lookBackDays);
-            DateTime end = DateTime.Now;
-
-            CrossHealthManager.Instance.GetHeartRate(start, end, (hr) =>
+            var (start, end) = GetTimeRange();
+            CrossHealthManager.Instance.GetHeartRate(start, end, (v) =>
             {
-                SetDataDisplay($"Avg Heart Rate ({GetTimeRangeLabel()}): {hr:F0} bpm");
-                SetStatus("Heart rate retrieved.");
+                SetDataDisplay($"❤️ Avg Heart Rate ({GetLabel()}): {v:F0} bpm");
+                SetStatus("Done.");
             });
         }
 
         private void OnGetDistance()
         {
             SetStatus("Fetching distance...");
-            DateTime start = DateTime.Today.AddDays(-lookBackDays);
-            DateTime end = DateTime.Now;
-
-            CrossHealthManager.Instance.GetDistance(start, end, (meters) =>
+            var (start, end) = GetTimeRange();
+            CrossHealthManager.Instance.GetDistance(start, end, (v) =>
             {
-                double km = meters / 1000.0;
-                SetDataDisplay($"Distance ({GetTimeRangeLabel()}): {km:F2} km");
-                SetStatus("Distance retrieved.");
+                SetDataDisplay($"📏 Distance ({GetLabel()}): {v / 1000.0:F2} km");
+                SetStatus("Done.");
             });
         }
 
         private void OnGetEnergy()
         {
             SetStatus("Fetching active energy...");
-            DateTime start = DateTime.Today.AddDays(-lookBackDays);
-            DateTime end = DateTime.Now;
-
-            CrossHealthManager.Instance.GetActiveEnergy(start, end, (kcal) =>
+            var (start, end) = GetTimeRange();
+            CrossHealthManager.Instance.GetActiveEnergy(start, end, (v) =>
             {
-                SetDataDisplay($"Active Energy ({GetTimeRangeLabel()}): {kcal:F0} kcal");
-                SetStatus("Active energy retrieved.");
+                SetDataDisplay($"🔥 Active Energy ({GetLabel()}): {v:F0} kcal");
+                SetStatus("Done.");
             });
         }
 
         private void OnGetFloors()
         {
-            SetStatus("Fetching floors climbed...");
-            DateTime start = DateTime.Today.AddDays(-lookBackDays);
-            DateTime end = DateTime.Now;
-
-            CrossHealthManager.Instance.GetFloorsClimbed(start, end, (floors) =>
+            SetStatus("Fetching floors...");
+            var (start, end) = GetTimeRange();
+            CrossHealthManager.Instance.GetFloorsClimbed(start, end, (v) =>
             {
-                SetDataDisplay($"Floors Climbed ({GetTimeRangeLabel()}): {floors:F0}");
-                SetStatus("Floors climbed retrieved.");
+                SetDataDisplay($"🏢 Floors Climbed ({GetLabel()}): {v:F0}");
+                SetStatus("Done.");
             });
         }
 
         private void OnGetRestingHR()
         {
-            SetStatus("Fetching resting heart rate...");
-            DateTime start = DateTime.Today.AddDays(-lookBackDays);
-            DateTime end = DateTime.Now;
-
-            CrossHealthManager.Instance.GetRestingHeartRate(start, end, (rhr) =>
+            SetStatus("Fetching resting HR...");
+            var (start, end) = GetTimeRange();
+            CrossHealthManager.Instance.GetRestingHeartRate(start, end, (v) =>
             {
-                SetDataDisplay($"Resting Heart Rate ({GetTimeRangeLabel()}): {rhr:F0} bpm");
-                SetStatus("Resting heart rate retrieved.");
+                SetDataDisplay($"💜 Resting Heart Rate ({GetLabel()}): {v:F0} bpm");
+                SetStatus("Done.");
             });
         }
 
         private void OnGetBodyMass()
         {
             SetStatus("Fetching body mass...");
-            DateTime start = DateTime.Today.AddDays(-lookBackDays * 30);
-            DateTime end = DateTime.Now;
-
-            CrossHealthManager.Instance.GetBodyMass(start, end, (kg) =>
+            CrossHealthManager.Instance.GetBodyMass(DateTime.Today.AddDays(-30), DateTime.Now, (v) =>
             {
-                SetDataDisplay($"Body Mass (latest): {kg:F1} kg");
-                SetStatus("Body mass retrieved.");
+                SetDataDisplay($"⚖️ Body Mass: {v:F1} kg");
+                SetStatus("Done.");
             });
         }
 
         private void OnGetHeight()
         {
             SetStatus("Fetching height...");
-            DateTime start = DateTime.Today.AddDays(-365);
-            DateTime end = DateTime.Now;
-
-            CrossHealthManager.Instance.GetHeight(start, end, (meters) =>
+            CrossHealthManager.Instance.GetHeight(DateTime.Today.AddDays(-365), DateTime.Now, (v) =>
             {
-                double cm = meters * 100.0;
-                SetDataDisplay($"Height (latest): {cm:F1} cm ({meters:F2} m)");
-                SetStatus("Height retrieved.");
+                SetDataDisplay($"📐 Height: {v * 100:F1} cm ({v:F2} m)");
+                SetStatus("Done.");
             });
         }
 
         private void OnGetBMI()
         {
             SetStatus("Fetching BMI...");
-            DateTime start = DateTime.Today.AddDays(-365);
-            DateTime end = DateTime.Now;
-
-            CrossHealthManager.Instance.GetBMI(start, end, (bmi) =>
+            CrossHealthManager.Instance.GetBMI(DateTime.Today.AddDays(-365), DateTime.Now, (v) =>
             {
-                string category = GetBMICategory(bmi);
-                SetDataDisplay($"BMI (latest): {bmi:F1} ({category})");
-                SetStatus("BMI retrieved.");
+                SetDataDisplay($"📊 BMI: {v:F1} ({GetBMICategory(v)})");
+                SetStatus("Done.");
             });
+        }
+
+        // ====================================================================
+        // Button Handlers - V2
+        // ====================================================================
+
+        private void OnGetSleep()
+        {
+            SetStatus("Fetching sleep data...");
+            var (start, end) = GetTimeRange();
+            CrossHealthManager.Instance.GetSleepAnalysis(start, end, (v) =>
+            {
+                SetDataDisplay($"😴 Sleep ({GetLabel()}): {v:F1} hrs");
+                SetStatus("Done.");
+            });
+        }
+
+        private void OnGetSpO2()
+        {
+            SetStatus("Fetching blood oxygen...");
+            var (start, end) = GetTimeRange();
+            CrossHealthManager.Instance.GetBloodOxygen(start, end, (v) =>
+            {
+                SetDataDisplay($"🫁 Blood Oxygen (SpO2): {v:F0}%");
+                SetStatus("Done.");
+            });
+        }
+
+        private void OnGetWorkout()
+        {
+            SetStatus("Fetching workout data...");
+            var (start, end) = GetTimeRange();
+            CrossHealthManager.Instance.GetWorkoutDuration(start, end, (v) =>
+            {
+                SetDataDisplay($"🏋️ Workout ({GetLabel()}): {v:F0} min");
+                SetStatus("Done.");
+            });
+        }
+
+        private void OnGetBloodPressure()
+        {
+            SetStatus("Fetching blood pressure...");
+            var (start, end) = GetTimeRange();
+            CrossHealthManager.Instance.GetBloodPressure(start, end, (sys, dia) =>
+            {
+                SetDataDisplay($"🩺 Blood Pressure: {sys:F0}/{dia:F0} mmHg");
+                SetStatus("Done.");
+            });
+        }
+
+        private void OnGetRespiratory()
+        {
+            SetStatus("Fetching respiratory rate...");
+            var (start, end) = GetTimeRange();
+            CrossHealthManager.Instance.GetRespiratoryRate(start, end, (v) =>
+            {
+                SetDataDisplay($"🌬️ Respiratory Rate: {v:F0} breaths/min");
+                SetStatus("Done.");
+            });
+        }
+
+        private void OnToggleObserver()
+        {
+            if (_isObservingHR)
+            {
+                CrossHealthManager.Instance.StopObserving(HealthDataType.HeartRate);
+                _isObservingHR = false;
+                SetStatus("Heart rate observer stopped.");
+                SetDataDisplay("Observer stopped. Tap to restart.");
+                UpdateObserverButtonLabel();
+            }
+            else
+            {
+                CrossHealthManager.Instance.StartObserving(HealthDataType.HeartRate, (v) =>
+                {
+                    // Display is handled by OnObserverEvent
+                }, 5f);
+                _isObservingHR = true;
+                SetStatus("Heart rate observer started (updates every 5s).");
+                UpdateObserverButtonLabel();
+            }
+        }
+
+        private void OnGetHistory()
+        {
+            SetStatus("Fetching 7-day step history...");
+            CrossHealthManager.Instance.GetStepHistory(
+                DateTime.Today.AddDays(-7), DateTime.Now,
+                HealthInterval.Daily,
+                (history) =>
+                {
+                    string output = "📈 7-Day Step History:\n";
+                    foreach (var point in history)
+                    {
+                        string bar = new string('█', (int)(point.Value / 1000));
+                        output += $"  {point.StartTime:ddd dd}: {point.Value:N0} {bar}\n";
+                    }
+                    SetDataDisplay(output);
+                    SetStatus("History loaded.");
+                });
         }
 
         private void OnGetAllData()
         {
             SetStatus("Fetching all health data...");
-            DateTime start = DateTime.Today.AddDays(-lookBackDays);
-            DateTime end = DateTime.Now;
+            var (start, end) = GetTimeRange();
             string output = "";
-
             int completed = 0;
-            int total = 6; // Number of metrics to fetch
+            int total = 9;
 
             CrossHealthManager.Instance.GetStepCount(start, end, (v) => {
-                output += $"Steps: {v:N0}\n";
+                output += $"🚶 Steps: {v:N0}\n";
                 if (++completed >= total) FinalizeAllData(output);
             });
             CrossHealthManager.Instance.GetDistance(start, end, (v) => {
-                output += $"Distance: {v / 1000.0:F2} km\n";
+                output += $"📏 Distance: {v / 1000.0:F2} km\n";
                 if (++completed >= total) FinalizeAllData(output);
             });
             CrossHealthManager.Instance.GetActiveEnergy(start, end, (v) => {
-                output += $"Active Energy: {v:F0} kcal\n";
+                output += $"🔥 Energy: {v:F0} kcal\n";
                 if (++completed >= total) FinalizeAllData(output);
             });
             CrossHealthManager.Instance.GetFloorsClimbed(start, end, (v) => {
-                output += $"Floors: {v:F0}\n";
+                output += $"🏢 Floors: {v:F0}\n";
                 if (++completed >= total) FinalizeAllData(output);
             });
             CrossHealthManager.Instance.GetHeartRate(start, end, (v) => {
-                output += $"Heart Rate: {v:F0} bpm\n";
+                output += $"❤️ Heart Rate: {v:F0} bpm\n";
                 if (++completed >= total) FinalizeAllData(output);
             });
             CrossHealthManager.Instance.GetRestingHeartRate(start, end, (v) => {
-                output += $"Resting HR: {v:F0} bpm\n";
+                output += $"💜 Resting HR: {v:F0} bpm\n";
+                if (++completed >= total) FinalizeAllData(output);
+            });
+            CrossHealthManager.Instance.GetSleepAnalysis(start, end, (v) => {
+                output += $"😴 Sleep: {v:F1} hrs\n";
+                if (++completed >= total) FinalizeAllData(output);
+            });
+            CrossHealthManager.Instance.GetBloodOxygen(start, end, (v) => {
+                output += $"🫁 SpO2: {v:F0}%\n";
+                if (++completed >= total) FinalizeAllData(output);
+            });
+            CrossHealthManager.Instance.GetRespiratoryRate(start, end, (v) => {
+                output += $"🌬️ Resp: {v:F0} brpm\n";
                 if (++completed >= total) FinalizeAllData(output);
             });
         }
 
         private void FinalizeAllData(string output)
         {
-            SetDataDisplay($"--- Health Dashboard ({GetTimeRangeLabel()}) ---\n{output}");
+            SetDataDisplay($"--- Health Dashboard ({GetLabel()}) ---\n{output}");
             SetStatus("All data retrieved.");
         }
 
@@ -278,36 +383,51 @@ namespace CrossHealth.Samples
         // UI Helpers
         // ====================================================================
 
-        private void SetStatus(string message)
+        private void SetStatus(string msg)
         {
-            if (statusText != null)
-                statusText.text = message;
-            Debug.Log($"[CrossHealth Sample] {message}");
+            if (statusText != null) statusText.text = msg;
+            Debug.Log($"[CrossHealth Sample] {msg}");
         }
 
         private void SetDataDisplay(string content)
         {
-            if (dataDisplayText != null)
-                dataDisplayText.text = content;
+            if (dataDisplayText != null) dataDisplayText.text = content;
         }
 
-        private void SetDataButtonsInteractable(bool interactable)
+        private void WireButton(Button btn, UnityEngine.Events.UnityAction action)
         {
-            Button[] dataButtons = {
+            if (btn != null) btn.onClick.AddListener(action);
+        }
+
+        private void SetDataButtonsInteractable(bool on)
+        {
+            Button[] btns = {
                 getStepsButton, getHeartRateButton, getDistanceButton,
                 getEnergyButton, getFloorsButton, getRestingHRButton,
                 getBodyMassButton, getHeightButton, getBMIButton,
-                getAllDataButton
+                getAllDataButton, getSleepButton, getSpO2Button,
+                getWorkoutButton, getBloodPressureButton, getRespiratoryButton,
+                toggleObserverButton, getHistoryButton
             };
+            foreach (var b in btns)
+                if (b != null) b.interactable = on;
+        }
 
-            foreach (var btn in dataButtons)
+        private void UpdateObserverButtonLabel()
+        {
+            if (toggleObserverButton != null)
             {
-                if (btn != null)
-                    btn.interactable = interactable;
+                var txt = toggleObserverButton.GetComponentInChildren<Text>();
+                if (txt != null) txt.text = _isObservingHR ? "⏹ Stop HR Observer" : "📡 Start HR Observer";
             }
         }
 
-        private string GetTimeRangeLabel()
+        private (DateTime start, DateTime end) GetTimeRange()
+        {
+            return (DateTime.Today.AddDays(-lookBackDays), DateTime.Now);
+        }
+
+        private string GetLabel()
         {
             return lookBackDays == 1 ? "Today" : $"Last {lookBackDays} days";
         }

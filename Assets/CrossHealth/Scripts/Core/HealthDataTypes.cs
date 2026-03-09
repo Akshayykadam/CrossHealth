@@ -33,7 +33,45 @@ namespace CrossHealth
         Height = 7,
 
         /// <summary>Body Mass Index (kg/m²).</summary>
-        BMI = 8
+        BMI = 8,
+
+        // --- V2 Data Types ---
+
+        /// <summary>Sleep analysis (hours of sleep).</summary>
+        SleepAnalysis = 9,
+
+        /// <summary>Blood oxygen saturation (SpO2) as percentage.</summary>
+        BloodOxygen = 10,
+
+        /// <summary>Workout session duration in minutes.</summary>
+        WorkoutSession = 11,
+
+        /// <summary>Blood pressure – systolic over diastolic (mmHg). Value encodes systolic.</summary>
+        BloodPressureSystolic = 12,
+
+        /// <summary>Blood pressure – diastolic (mmHg).</summary>
+        BloodPressureDiastolic = 13,
+
+        /// <summary>Respiratory rate in breaths per minute.</summary>
+        RespiratoryRate = 14
+    }
+
+    /// <summary>
+    /// Time interval for historical data bucketing.
+    /// </summary>
+    public enum HealthInterval
+    {
+        /// <summary>One data point per hour.</summary>
+        Hourly = 0,
+
+        /// <summary>One data point per day.</summary>
+        Daily = 1,
+
+        /// <summary>One data point per week.</summary>
+        Weekly = 2,
+
+        /// <summary>One data point per month.</summary>
+        Monthly = 3
     }
 
     /// <summary>
@@ -91,12 +129,20 @@ namespace CrossHealth
 
                 case HealthDataType.HeartRate:
                 case HealthDataType.RestingHeartRate:
+                case HealthDataType.BloodOxygen:
+                case HealthDataType.RespiratoryRate:
                     return HealthAggregationType.DiscreteAverage;
 
                 case HealthDataType.BodyMass:
                 case HealthDataType.Height:
                 case HealthDataType.BMI:
+                case HealthDataType.BloodPressureSystolic:
+                case HealthDataType.BloodPressureDiastolic:
                     return HealthAggregationType.MostRecent;
+
+                case HealthDataType.SleepAnalysis:
+                case HealthDataType.WorkoutSession:
+                    return HealthAggregationType.CumulativeSum;
 
                 default:
                     return HealthAggregationType.CumulativeSum;
@@ -127,6 +173,17 @@ namespace CrossHealth
                     return "m";
                 case HealthDataType.BMI:
                     return "kg/m²";
+                case HealthDataType.SleepAnalysis:
+                    return "hrs";
+                case HealthDataType.BloodOxygen:
+                    return "%";
+                case HealthDataType.WorkoutSession:
+                    return "min";
+                case HealthDataType.BloodPressureSystolic:
+                case HealthDataType.BloodPressureDiastolic:
+                    return "mmHg";
+                case HealthDataType.RespiratoryRate:
+                    return "brpm";
                 default:
                     return "";
             }
